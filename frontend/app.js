@@ -6,7 +6,10 @@ const state = {
   playerId: null,
   publicRooms: [],
   joystick: { active: false, x: 0, y: 0 },
+  push: { activeUntil: 0, cooldownUntil: 0, directionX: 1, directionY: 0 },
   renderPlayers: new Map(),
+  scrollLocked: false,
+  scrollLockY: 0,
   lastFrameAt: performance.now()
 };
 
@@ -21,6 +24,8 @@ const copyRoomButton = document.getElementById("copy-room");
 const readyButton = document.getElementById("ready-button");
 const rematchButton = document.getElementById("rematch-button");
 const refreshRoomsButton = document.getElementById("refresh-rooms");
+const pushButton = document.getElementById("push-button");
+const pushMeta = document.getElementById("push-meta");
 const publicRoomsElement = document.getElementById("public-rooms");
 const roomsStatus = document.getElementById("rooms-status");
 const roomTitle = document.getElementById("room-title");
@@ -33,17 +38,19 @@ const gameStatus = document.getElementById("game-status");
 const toast = document.getElementById("toast");
 const canvas = document.getElementById("arena-canvas");
 const ctx = canvas.getContext("2d");
-const joystickZone = document.getElementById("joystick-zone");
-const joystickBase = document.querySelector(".joystick-base");
+const joystickBase = document.getElementById("joystick-zone");
 const joystickKnob = document.getElementById("joystick-knob");
 
 const ARENA_RADIUS = 180;
 const PLAYER_RADIUS = 18;
 const PLAYER_SPEED = 240;
+const PUSH_SPEED = 340;
+const PUSH_DURATION_MS = 180;
+const PUSH_COOLDOWN_MS = 900;
 const JOYSTICK_DEADZONE = 0.12;
 const SLIME_COLORS = [
-  { base: "#7ee6ff", edge: "#2d89ff", label: "#9be9ff" },
-  { base: "#ffb591", edge: "#ff6130", label: "#ffc7ab" }
+  { base: "#7ee6ff", edge: "#2d89ff", label: "#9be9ff", glow: "rgba(76, 196, 255, 0.22)" },
+  { base: "#ffb591", edge: "#ff6130", label: "#ffc7ab", glow: "rgba(255, 109, 79, 0.22)" }
 ];
 
 function setToast(message) {
@@ -55,6 +62,37 @@ function setToast(message) {
 
 function getPlayerName() {
   return playerNameInput.value.trim() || "Player";
+}
+
+function isGameInteractive() {
+  return Boolean(state.room && (state.room.phase === "countdown" || state.room.phase === "playing"));
+}
+
+function setScrollLock(locked) {
+  if (state.scrollLocked === locked) {
+    return;
+  }
+
+  state.scrollLocked = locked;
+
+  if (locked) {
+    state.scrollLockY = window.scrollY;
+    document.documentElement.classList.add("game-lock");
+    document.body.classList.add("game-lock");
+    document.body.style.top = `-${state.scrollLockY}px`;
+    return;
+  }
+
+  document.documentElement.classList.remove("game-lock");
+  document.body.classList.remove("game-lock");
+  document.body.style.top = "";
+  window.scrollTo(0, state.scrollLockY);
+}
+
+function preventGameGesture(event) {
+  if (isGameInteractive()) {
+    event.preventDefault();
+  }
 }
 
 function sendOpenSocket(type, payload = {}) {
@@ -87,7 +125,10 @@ function connectSocket(forceReconnect = false) {
     state.connected = false;
     state.room = null;
     state.playerId = null;
+    state.push.activeUntil = 0;
+    state.push.cooldownUntil = 0;
     state.renderPlayers.clear();
+    setScrollLock(false);
     showPanel("menu");
     renderPublicRooms();
 
@@ -248,11 +289,11 @@ function describeStatus(room) {
   }
 
   if (room.phase === "countdown") {
-    return "곧 시작합니다. 지금 조이스틱을 잡고 있어도 시작과 동시에 입력됩니다.";
+    return "곧 시작합니다. 화면은 고정되고, 이동 입력은 시작과 동시에 반영됩니다.";
   }
 
   if (room.phase === "playing") {
-    return "상대를 경기장 밖으로 밀어내세요. 내 슬라임은 즉시 반응하고 서버가 위치를 보정합니다.";
+    return "오른쪽으로 움직이고, 왼쪽 버튼으로 짧게 돌진하며 강하게 밀어내세요.";
   }
 
   if (room.winReason === "ring_out") {
@@ -287,6 +328,9 @@ function syncRenderPlayers(room) {
         vy: player.state.vy,
         serverVx: player.state.vx,
         serverVy: player.state.vy,
+        facingX: player.state.facingX || 1,
+        facingY: player.state.facingY || 0,
+        isPushing: player.state.isPushing,
         alive: player.state.alive,
         slot: player.slot,
         name: player.name,
@@ -298,6 +342,9 @@ function syncRenderPlayers(room) {
     renderState.serverY = player.state.y;
     renderState.serverVx = player.state.vx;
     renderState.serverVy = player.state.vy;
+    renderState.facingX = player.state.facingX || renderState.facingX;
+    renderState.facingY = player.state.facingY || renderState.facingY;
+    renderState.isPushing = player.state.isPushing;
     renderState.alive = player.state.alive;
     renderState.slot = player.slot;
     renderState.name = player.name;
@@ -319,13 +366,67 @@ function syncRenderPlayers(room) {
   }
 }
 
+function syncSelfActionState(room) {
+  const selfPlayer = room.players.find((player) => player.id === state.playerId);
+  if (!selfPlayer) {
+    return;
+  }
+
+  const now = performance.now();
+  if (selfPlayer.state.facingX || selfPlayer.state.facingY) {
+    state.push.directionX = selfPlayer.state.facingX;
+    state.push.directionY = selfPlayer.state.facingY;
+  }
+
+  if (room.phase !== "playing") {
+    state.push.activeUntil = 0;
+    state.push.cooldownUntil = 0;
+    return;
+  }
+
+  if (selfPlayer.state.isPushing) {
+    state.push.activeUntil = Math.max(state.push.activeUntil, now + selfPlayer.state.pushRemainingMs);
+  }
+
+  state.push.cooldownUntil = Math.max(state.push.cooldownUntil, now + selfPlayer.state.pushCooldownRemainingMs);
+}
+
+function renderPushButton(now = performance.now()) {
+  const cooldownMs = Math.max(0, state.push.cooldownUntil - now);
+  const isActive = now < state.push.activeUntil;
+  const canUse = Boolean(state.room && state.room.phase === "playing" && cooldownMs === 0);
+
+  pushButton.classList.toggle("active", isActive);
+  pushButton.classList.toggle("cooldown", cooldownMs > 0);
+  pushButton.disabled = !canUse;
+
+  if (!state.room) {
+    pushMeta.textContent = "Ready";
+    return;
+  }
+
+  if (state.room.phase === "countdown") {
+    pushMeta.textContent = "Wait";
+    return;
+  }
+
+  if (cooldownMs > 0) {
+    pushMeta.textContent = `${(cooldownMs / 1000).toFixed(1)}s`;
+    return;
+  }
+
+  pushMeta.textContent = "Ready";
+}
+
 function updateRoom(room) {
   state.room = room;
   syncRenderPlayers(room);
+  syncSelfActionState(room);
 
   roomTitle.textContent = room.roomId;
   renderLobbyPlayers(room.players);
   renderPublicRooms();
+  renderPushButton();
   lobbyStatus.textContent = describeStatus(room);
   gameStatus.textContent = describeStatus(room);
   phaseLabel.textContent = room.phase.toUpperCase();
@@ -337,6 +438,7 @@ function updateRoom(room) {
   readyButton.classList.toggle("hidden", room.phase === "finished");
   rematchButton.classList.toggle("hidden", room.phase !== "finished");
 
+  setScrollLock(room.phase === "countdown" || room.phase === "playing");
   showPanel(room.phase === "playing" || room.phase === "countdown" ? "game" : "lobby");
 }
 
@@ -369,6 +471,39 @@ function getSelfPlayer() {
   return state.room?.players.find((player) => player.id === state.playerId) || null;
 }
 
+function getCurrentFacingVector() {
+  if (state.joystick.x || state.joystick.y) {
+    const length = Math.hypot(state.joystick.x, state.joystick.y) || 1;
+    return { x: state.joystick.x / length, y: state.joystick.y / length };
+  }
+
+  const self = getSelfPlayer();
+  if (self?.state.facingX || self?.state.facingY) {
+    return { x: self.state.facingX || 0, y: self.state.facingY || 0 };
+  }
+
+  return { x: state.push.directionX || 1, y: state.push.directionY || 0 };
+}
+
+function triggerPushAction() {
+  if (!state.room || state.room.phase !== "playing") {
+    return;
+  }
+
+  const now = performance.now();
+  if (now < state.push.cooldownUntil) {
+    return;
+  }
+
+  const direction = getCurrentFacingVector();
+  state.push.directionX = direction.x;
+  state.push.directionY = direction.y;
+  state.push.activeUntil = now + PUSH_DURATION_MS;
+  state.push.cooldownUntil = now + PUSH_COOLDOWN_MS;
+  renderPushButton(now);
+  sendOpenSocket("trigger_push");
+}
+
 function applyJoystickVisual(x, y) {
   const baseRect = joystickBase.getBoundingClientRect();
   const knobRect = joystickKnob.getBoundingClientRect();
@@ -381,6 +516,11 @@ function updateJoystick(x, y, transmit = true) {
   state.joystick.y = y;
   applyJoystickVisual(x, y);
 
+  if (x || y) {
+    state.push.directionX = x;
+    state.push.directionY = y;
+  }
+
   if (transmit) {
     sendOpenSocket("input_move", { x, y });
   }
@@ -391,13 +531,15 @@ function resetJoystick() {
   updateJoystick(0, 0);
 }
 
-function handleJoystickPointer(clientX, clientY) {
+function handleJoystickPointer(event) {
+  event.preventDefault();
+
   const rect = joystickBase.getBoundingClientRect();
   const knobRect = joystickKnob.getBoundingClientRect();
   const baseCenterX = rect.left + rect.width / 2;
   const baseCenterY = rect.top + rect.height / 2;
-  const dx = clientX - baseCenterX;
-  const dy = clientY - baseCenterY;
+  const dx = event.clientX - baseCenterX;
+  const dy = event.clientY - baseCenterY;
   const maxDistance = Math.max(1, rect.width / 2 - knobRect.width / 2 - 6);
   const rawDistance = Math.min(maxDistance, Math.hypot(dx, dy));
   const angle = Math.atan2(dy, dx);
@@ -414,23 +556,29 @@ function handleJoystickPointer(clientX, clientY) {
   updateJoystick(Number(x.toFixed(4)), Number(y.toFixed(4)));
 }
 
-joystickZone.addEventListener("pointerdown", (event) => {
+joystickBase.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
   state.joystick.active = true;
-  joystickZone.setPointerCapture(event.pointerId);
-  handleJoystickPointer(event.clientX, event.clientY);
+  joystickBase.setPointerCapture(event.pointerId);
+  handleJoystickPointer(event);
 });
 
-joystickZone.addEventListener("pointermove", (event) => {
+joystickBase.addEventListener("pointermove", (event) => {
   if (!state.joystick.active) {
     return;
   }
 
-  handleJoystickPointer(event.clientX, event.clientY);
+  handleJoystickPointer(event);
 });
 
-joystickZone.addEventListener("pointerup", resetJoystick);
-joystickZone.addEventListener("pointercancel", resetJoystick);
+joystickBase.addEventListener("pointerup", resetJoystick);
+joystickBase.addEventListener("pointercancel", resetJoystick);
 window.addEventListener("pointerup", resetJoystick);
+
+pushButton.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  triggerPushAction();
+});
 
 createRoomButton.addEventListener("click", () => {
   send("create_room", { name: getPlayerName() });
@@ -467,6 +615,11 @@ readyButton.addEventListener("click", () => {
 
 rematchButton.addEventListener("click", () => {
   send("rematch_request");
+});
+
+[gamePanel, canvas, joystickBase, pushButton].forEach((element) => {
+  element.addEventListener("touchstart", preventGameGesture, { passive: false });
+  element.addEventListener("touchmove", preventGameGesture, { passive: false });
 });
 
 setInterval(() => {
@@ -525,12 +678,23 @@ function drawSlime(renderState, isSelf, now) {
   const x = worldToCanvas(renderState.x);
   const y = worldToCanvas(renderState.y);
   const palette = SLIME_COLORS[renderState.slot] || SLIME_COLORS[0];
-  const speed = Math.min(1, Math.hypot(renderState.vx, renderState.vy) / PLAYER_SPEED);
+  const localPushActive = isSelf && now < state.push.activeUntil;
+  const pushing = renderState.isPushing || localPushActive;
+  const speed = Math.min(1, Math.hypot(renderState.vx, renderState.vy) / (PLAYER_SPEED + PUSH_SPEED * 0.5));
   const wobble = Math.sin(now / 150 + renderState.wobbleOffset) * 0.08;
   const rotation = Math.atan2(renderState.vy || 0.001, renderState.vx || 0.001) * 0.18;
-  const stretchX = 1 + speed * 0.16 + wobble * 0.22;
-  const stretchY = 1 - speed * 0.1 - wobble * 0.1;
+  const stretchX = 1 + speed * 0.16 + wobble * 0.22 + (pushing ? 0.14 : 0);
+  const stretchY = 1 - speed * 0.1 - wobble * 0.1 - (pushing ? 0.08 : 0);
   const droop = renderState.alive ? 0 : 5;
+
+  if (pushing) {
+    ctx.save();
+    ctx.fillStyle = palette.glow;
+    ctx.beginPath();
+    ctx.arc(x, y, PLAYER_RADIUS + 16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 
   ctx.save();
   ctx.translate(x, y + 14);
@@ -585,7 +749,7 @@ function drawSlime(renderState, isSelf, now) {
     ctx.fill();
     ctx.lineWidth = 1.8;
     ctx.beginPath();
-    ctx.arc(0, 6, 6, 0.12 * Math.PI, 0.88 * Math.PI);
+    ctx.arc(0, 6, pushing ? 7 : 6, 0.12 * Math.PI, 0.88 * Math.PI);
     ctx.stroke();
   } else {
     ctx.lineWidth = 1.8;
@@ -638,16 +802,19 @@ function drawPlayers(deltaMs, now) {
     const isSelf = player.id === state.playerId;
 
     if (isSelf && state.room.phase === "playing") {
-      const desiredVx = state.joystick.x * PLAYER_SPEED;
-      const desiredVy = state.joystick.y * PLAYER_SPEED;
-      renderState.x += desiredVx * deltaSeconds;
-      renderState.y += desiredVy * deltaSeconds;
-      renderState.vx += (desiredVx - renderState.vx) * 0.28;
-      renderState.vy += (desiredVy - renderState.vy) * 0.28;
+      const pushActive = now < state.push.activeUntil;
+      const pushVx = pushActive ? state.push.directionX * PUSH_SPEED : 0;
+      const pushVy = pushActive ? state.push.directionY * PUSH_SPEED : 0;
+
+      renderState.x += (state.joystick.x * PLAYER_SPEED + pushVx) * deltaSeconds;
+      renderState.y += (state.joystick.y * PLAYER_SPEED + pushVy) * deltaSeconds;
+      renderState.vx += (state.joystick.x * PLAYER_SPEED + pushVx - renderState.vx) * 0.28;
+      renderState.vy += (state.joystick.y * PLAYER_SPEED + pushVy - renderState.vy) * 0.28;
       renderState.x += (renderState.serverX - renderState.x) * 0.18;
       renderState.y += (renderState.serverY - renderState.y) * 0.18;
       renderState.vx += (renderState.serverVx - renderState.vx) * 0.08;
       renderState.vy += (renderState.serverVy - renderState.vy) * 0.08;
+      renderState.isPushing = pushActive || renderState.isPushing;
     } else {
       const positionLerp = Math.min(1, deltaMs / 55);
       renderState.x += (renderState.serverX - renderState.x) * positionLerp;
@@ -665,10 +832,12 @@ function animate(now) {
   state.lastFrameAt = now;
   drawArena(now);
   drawPlayers(deltaMs, now);
+  renderPushButton(now);
   requestAnimationFrame(animate);
 }
 
 renderPublicRooms();
+renderPushButton();
 connectSocket();
 requestAnimationFrame(animate);
 showPanel("menu");

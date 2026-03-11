@@ -18,7 +18,8 @@ const {
   resetRound,
   serializePublicRoom,
   serializeRoom,
-  tickRoom
+  tickRoom,
+  triggerPush
 } = require("./game");
 
 const frontendDir = path.resolve(__dirname, "../../frontend");
@@ -259,6 +260,18 @@ function handleMessage(socket, rawMessage) {
     }
 
     applyInput(player, payload);
+    return;
+  }
+
+  if (type === "trigger_push") {
+    if (room.round.phase !== "playing") {
+      return;
+    }
+
+    const triggered = triggerPush(player, Date.now());
+    if (triggered) {
+      broadcastState(room);
+    }
     return;
   }
 

@@ -17,16 +17,28 @@ const normalizeInput = (input) => {
   };
 };
 
-const createPlayerState = (slot) => ({
-  slot,
-  x: slot === 0 ? -70 : 70,
-  y: 0,
-  vx: 0,
-  vy: 0,
-  inputX: 0,
-  inputY: 0,
-  alive: true
-});
+const createPlayerState = (slot) => {
+  const facingX = slot === 0 ? 1 : -1;
+
+  return {
+    slot,
+    x: slot === 0 ? -70 : 70,
+    y: 0,
+    vx: 0,
+    vy: 0,
+    inputX: 0,
+    inputY: 0,
+    facingX,
+    facingY: 0,
+    knockbackX: 0,
+    knockbackY: 0,
+    pushX: facingX,
+    pushY: 0,
+    pushEndsAt: 0,
+    pushCooldownEndsAt: 0,
+    alive: true
+  };
+};
 
 const createRoundState = () => ({
   phase: "lobby",
@@ -41,6 +53,10 @@ function getConnectedPlayers(room) {
   return [...room.players.values()]
     .filter((player) => player.connected)
     .sort((a, b) => a.slot - b.slot);
+}
+
+function isPushActive(playerState, now) {
+  return playerState.pushEndsAt > now;
 }
 
 function resetRound(room) {
@@ -125,21 +141,44 @@ function applyInput(player, input) {
   const normalized = normalizeInput(input);
   player.state.inputX = normalized.x;
   player.state.inputY = normalized.y;
+
+  if (normalized.x || normalized.y) {
+    player.state.facingX = normalized.x;
+    player.state.facingY = normalized.y;
+  }
 }
 
-function resolveCollision(playerA, playerB) {
+function triggerPush(player, now) {
+  if (!player.state.alive || player.state.pushCooldownEndsAt > now) {
+    return false;
+  }
+
+  const direction = normalizeInput({
+    x: player.state.facingX || (player.slot === 0 ? 1 : -1),
+    y: player.state.facingY || 0
+  });
+
+  player.state.pushX = direction.x || (player.slot === 0 ? 1 : -1);
+  player.state.pushY = direction.y || 0;
+  player.state.pushEndsAt = now + config.pushDurationMs;
+  player.state.pushCooldownEndsAt = now + config.pushCooldownMs;
+  return true;
+}
+
+function resolveCollision(playerA, playerB, now) {
   const dx = playerB.x - playerA.x;
   const dy = playerB.y - playerA.y;
   const distance = Math.hypot(dx, dy);
   const minDistance = config.playerRadius * 2;
 
-  if (!distance || distance >= minDistance) {
+  if (distance >= minDistance) {
     return;
   }
 
-  const normalX = dx / distance;
-  const normalY = dy / distance;
-  const overlap = minDistance - distance;
+  const safeDistance = distance || 0.001;
+  const normalX = distance ? dx / safeDistance : 1;
+  const normalY = distance ? dy / safeDistance : 0;
+  const overlap = minDistance - safeDistance;
 
   playerA.x -= normalX * overlap * 0.5;
   playerA.y -= normalY * overlap * 0.5;
@@ -149,28 +188,38 @@ function resolveCollision(playerA, playerB) {
   const relativeVelocityX = playerB.vx - playerA.vx;
   const relativeVelocityY = playerB.vy - playerA.vy;
   const impactSpeed = relativeVelocityX * normalX + relativeVelocityY * normalY;
+  const sharedImpulse = Math.max(
+    config.baseCollisionImpulse,
+    Math.abs(impactSpeed) * 0.75 + config.baseCollisionImpulse
+  );
+  const aPushBonus = isPushActive(playerA, now) ? config.pushCollisionImpulse : 0;
+  const bPushBonus = isPushActive(playerB, now) ? config.pushCollisionImpulse : 0;
 
-  if (impactSpeed <= 0) {
-    const impulse = Math.abs(impactSpeed) * 0.9 + 80;
-    playerA.vx -= normalX * impulse;
-    playerA.vy -= normalY * impulse;
-    playerB.vx += normalX * impulse;
-    playerB.vy += normalY * impulse;
-  }
+  playerA.knockbackX -= normalX * (sharedImpulse + bPushBonus);
+  playerA.knockbackY -= normalY * (sharedImpulse + bPushBonus);
+  playerB.knockbackX += normalX * (sharedImpulse + aPushBonus);
+  playerB.knockbackY += normalY * (sharedImpulse + aPushBonus);
 }
 
-function updatePhysics(room, deltaSeconds) {
+function updatePhysics(room, now, deltaSeconds) {
   const activePlayers = [...room.players.values()].filter((player) => player.state.alive);
 
   for (const player of activePlayers) {
-    player.state.vx = player.state.inputX * config.playerSpeed;
-    player.state.vy = player.state.inputY * config.playerSpeed;
+    const knockbackDecay = Math.max(0, 1 - config.knockbackDragPerSecond * deltaSeconds);
+    player.state.knockbackX *= knockbackDecay;
+    player.state.knockbackY *= knockbackDecay;
+
+    const dashVx = isPushActive(player.state, now) ? player.state.pushX * config.pushBoostSpeed : 0;
+    const dashVy = isPushActive(player.state, now) ? player.state.pushY * config.pushBoostSpeed : 0;
+
+    player.state.vx = player.state.inputX * config.playerSpeed + dashVx + player.state.knockbackX;
+    player.state.vy = player.state.inputY * config.playerSpeed + dashVy + player.state.knockbackY;
     player.state.x += player.state.vx * deltaSeconds;
     player.state.y += player.state.vy * deltaSeconds;
   }
 
   if (activePlayers.length === 2) {
-    resolveCollision(activePlayers[0].state, activePlayers[1].state);
+    resolveCollision(activePlayers[0].state, activePlayers[1].state, now);
   }
 
   for (const player of activePlayers) {
@@ -225,7 +274,7 @@ function tickRoom(room, now, deltaSeconds) {
     return null;
   }
 
-  updatePhysics(room, deltaSeconds);
+  updatePhysics(room, now, deltaSeconds);
 
   const alivePlayers = [...room.players.values()].filter((player) => player.state.alive);
   if (alivePlayers.length === 1) {
@@ -264,6 +313,11 @@ function serializeRoom(room, now) {
           y: Number(player.state.y.toFixed(2)),
           vx: Number(player.state.vx.toFixed(2)),
           vy: Number(player.state.vy.toFixed(2)),
+          facingX: Number(player.state.facingX.toFixed(3)),
+          facingY: Number(player.state.facingY.toFixed(3)),
+          isPushing: isPushActive(player.state, now),
+          pushRemainingMs: Math.max(0, player.state.pushEndsAt - now),
+          pushCooldownRemainingMs: Math.max(0, player.state.pushCooldownEndsAt - now),
           alive: player.state.alive
         }
       }))
@@ -305,9 +359,11 @@ module.exports = {
   finishRound,
   getConnectedPlayers,
   isPublicRoom,
+  isPushActive,
   normalizeInput,
   resetRound,
   serializePublicRoom,
   serializeRoom,
-  tickRoom
+  tickRoom,
+  triggerPush
 };

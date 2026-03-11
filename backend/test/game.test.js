@@ -9,9 +9,12 @@ const {
   determineTimeoutWinner,
   finishRound,
   isPublicRoom,
+  isPushActive,
   normalizeInput,
   serializePublicRoom,
-  tickRoom
+  serializeRoom,
+  tickRoom,
+  triggerPush
 } = require("../src/game");
 
 test("normalizeInput clamps diagonal input to unit length", () => {
@@ -95,4 +98,27 @@ test("countdown rooms are hidden from public room list", () => {
 
   beginCountdown(room, Date.now());
   assert.equal(isPublicRoom(room), false);
+});
+
+test("triggerPush enables temporary push state and cooldown", () => {
+  const player = createPlayer("a", "A", null, 0);
+  const now = 1000;
+
+  assert.equal(triggerPush(player, now), true);
+  assert.equal(isPushActive(player.state, now + 20), true);
+  assert.equal(player.state.pushCooldownEndsAt > now, true);
+  assert.equal(triggerPush(player, now + 10), false);
+});
+
+test("serializeRoom includes push metadata for clients", () => {
+  const room = createRoom("PUSH");
+  const socket = { readyState: 1, OPEN: 1 };
+  const player = createPlayer("a", "A", socket, 0);
+  room.players.set(player.id, player);
+  triggerPush(player, 1000);
+
+  const snapshot = serializeRoom(room, 1050);
+  assert.equal(snapshot.players[0].state.isPushing, true);
+  assert.ok(snapshot.players[0].state.pushRemainingMs > 0);
+  assert.ok(snapshot.players[0].state.pushCooldownRemainingMs > 0);
 });

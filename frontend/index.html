@@ -74,13 +74,21 @@
         <div class="arena-wrap">
           <canvas id="arena-canvas" width="420" height="420"></canvas>
         </div>
-        <div class="joystick-wrap" id="joystick-zone">
-          <div class="joystick-base">
-            <div class="joystick-knob" id="joystick-knob"></div>
+        <div class="controls-row">
+          <div class="push-wrap">
+            <button class="push-button" id="push-button" type="button">
+              <span class="push-title">밀치기</span>
+              <span class="push-meta" id="push-meta">Ready</span>
+            </button>
           </div>
-          <div class="joystick-copy">
-            <strong>Move</strong>
-            <span>왼쪽 조이스틱으로 슬라임을 밀어붙이세요.</span>
+          <div class="joystick-wrap">
+            <div class="joystick-copy">
+              <strong>Move</strong>
+              <span>오른쪽 조이스틱으로 움직이고, 왼쪽 버튼으로 짧게 들이받으세요.</span>
+            </div>
+            <div class="joystick-base" id="joystick-zone">
+              <div class="joystick-knob" id="joystick-knob"></div>
+            </div>
           </div>
         </div>
         <p class="status-line" id="game-status">상대를 경기장 밖으로 밀어내세요.</p>

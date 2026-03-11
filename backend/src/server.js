@@ -314,7 +314,10 @@ function serveStatic(req, res) {
 
     const extension = path.extname(filePath);
     res.writeHead(200, {
-      "Content-Type": mimeTypes[extension] || "application/octet-stream"
+      "Content-Type": mimeTypes[extension] || "application/octet-stream",
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0"
     });
     res.end(content);
   });

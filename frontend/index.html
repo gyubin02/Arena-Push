@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Arena Push</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <section class="panel intro-panel" id="menu-panel">
+        <p class="eyebrow">2-Player Mobile Web Mini Game</p>
+        <h1>Arena Push</h1>
+        <p class="intro-copy">
+          같은 방에 접속한 두 플레이어가 원형 경기장에서 서로를 밀어내는 짧은 실시간 대전입니다.
+        </p>
+        <div class="stack">
+          <label class="field">
+            <span>Your name</span>
+            <input id="player-name" maxlength="20" placeholder="Player" value="Player" />
+          </label>
+          <button class="primary" id="create-room">Create room</button>
+          <div class="join-row">
+            <input id="room-code" maxlength="4" placeholder="ROOM" />
+            <button id="join-room">Join</button>
+          </div>
+        </div>
+        <p class="hint">한 명이 방을 만들고, 다른 한 명은 방 코드를 입력해 들어오면 됩니다.</p>
+      </section>
+
+      <section class="panel lobby-panel hidden" id="lobby-panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Room</p>
+            <h2 id="room-title">----</h2>
+          </div>
+          <button class="ghost" id="copy-room">Copy code</button>
+        </div>
+        <div class="player-cards" id="player-cards"></div>
+        <div class="stack">
+          <button class="primary" id="ready-button">Ready</button>
+          <button class="ghost hidden" id="rematch-button">Rematch</button>
+        </div>
+        <p class="status-line" id="lobby-status">상대가 들어오면 준비를 눌러 시작하세요.</p>
+      </section>
+
+      <section class="panel game-panel hidden" id="game-panel">
+        <div class="hud">
+          <div class="score-chip" id="phase-label">Lobby</div>
+          <div class="timer" id="timer-label">00.0</div>
+          <div class="score-chip" id="result-label">Fight</div>
+        </div>
+        <div class="arena-wrap">
+          <canvas id="arena-canvas" width="420" height="420"></canvas>
+        </div>
+        <div class="joystick-wrap" id="joystick-zone">
+          <div class="joystick-base">
+            <div class="joystick-knob" id="joystick-knob"></div>
+          </div>
+        </div>
+        <p class="status-line" id="game-status">왼쪽 조이스틱으로 움직여 상대를 밀어내세요.</p>
+      </section>
+    </div>
+
+    <div class="toast hidden" id="toast"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

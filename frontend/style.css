@@ -316,7 +316,7 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 #arena-canvas {
@@ -331,10 +331,10 @@ input {
 .controls-row {
   display: grid;
   grid-template-columns: minmax(132px, 0.9fr) minmax(0, 1.1fr);
-  gap: 16px;
-  align-items: stretch;
+  gap: 12px;
+  align-items: end;
   margin-top: 0;
-  margin-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  margin-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 }
 
 .push-wrap,
@@ -344,7 +344,7 @@ input {
 
 .push-wrap {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
 }
 
 .push-button {
@@ -390,9 +390,8 @@ input {
 
 .joystick-wrap {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
   touch-action: none;
 }
 
@@ -404,7 +403,6 @@ input {
   background: radial-gradient(circle, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05));
   border: 1px solid rgba(255, 255, 255, 0.14);
   touch-action: none;
-  align-self: flex-end;
 }
 
 .joystick-knob {
@@ -417,20 +415,6 @@ input {
   transform: translate(-50%, -50%);
   background: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.52));
   box-shadow: 0 12px 20px rgba(0, 0, 0, 0.25);
-}
-
-.joystick-copy {
-  display: grid;
-  gap: 4px;
-}
-
-.joystick-copy strong {
-  font-size: 1rem;
-}
-
-.joystick-copy span {
-  color: var(--text-muted);
-  line-height: 1.45;
 }
 
 .toast {
@@ -472,7 +456,7 @@ input {
   .controls-row {
     grid-template-columns: 0.92fr 1.08fr;
     gap: 12px;
-    margin-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    margin-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
   }
 
   .joystick-base {

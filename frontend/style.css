@@ -291,6 +291,7 @@ input {
 .game-panel {
   display: flex;
   flex-direction: column;
+  justify-content: flex-start;
   min-height: calc(100dvh - 32px);
 }
 
@@ -313,10 +314,9 @@ input {
 
 .arena-wrap {
   display: flex;
-  flex: 1 1 auto;
   align-items: center;
   justify-content: center;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
 }
 
 #arena-canvas {
@@ -333,8 +333,8 @@ input {
   grid-template-columns: minmax(132px, 0.9fr) minmax(0, 1.1fr);
   gap: 16px;
   align-items: stretch;
-  margin-top: auto;
-  margin-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  margin-top: 0;
+  margin-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
 }
 
 .push-wrap,
@@ -472,7 +472,7 @@ input {
   .controls-row {
     grid-template-columns: 0.92fr 1.08fr;
     gap: 12px;
-    margin-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+    margin-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   .joystick-base {

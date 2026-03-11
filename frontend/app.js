@@ -5,7 +5,7 @@ const state = {
   room: null,
   playerId: null,
   publicRooms: [],
-  joystick: { active: false, x: 0, y: 0 },
+  joystick: { active: false, x: 0, y: 0, pointerId: null },
   push: { activeUntil: 0, cooldownUntil: 0, directionX: 1, directionY: 0 },
   renderPlayers: new Map(),
   scrollLocked: false,
@@ -125,6 +125,8 @@ function connectSocket(forceReconnect = false) {
     state.connected = false;
     state.room = null;
     state.playerId = null;
+    state.joystick.active = false;
+    state.joystick.pointerId = null;
     state.push.activeUntil = 0;
     state.push.cooldownUntil = 0;
     state.renderPlayers.clear();
@@ -526,8 +528,13 @@ function updateJoystick(x, y, transmit = true) {
   }
 }
 
-function resetJoystick() {
+function resetJoystick(event = null) {
+  if (event && state.joystick.pointerId !== null && event.pointerId !== state.joystick.pointerId) {
+    return;
+  }
+
   state.joystick.active = false;
+  state.joystick.pointerId = null;
   updateJoystick(0, 0);
 }
 
@@ -558,13 +565,18 @@ function handleJoystickPointer(event) {
 
 joystickBase.addEventListener("pointerdown", (event) => {
   event.preventDefault();
+  if (state.joystick.active && state.joystick.pointerId !== event.pointerId) {
+    return;
+  }
+
   state.joystick.active = true;
+  state.joystick.pointerId = event.pointerId;
   joystickBase.setPointerCapture(event.pointerId);
   handleJoystickPointer(event);
 });
 
 joystickBase.addEventListener("pointermove", (event) => {
-  if (!state.joystick.active) {
+  if (!state.joystick.active || event.pointerId !== state.joystick.pointerId) {
     return;
   }
 
@@ -573,7 +585,7 @@ joystickBase.addEventListener("pointermove", (event) => {
 
 joystickBase.addEventListener("pointerup", resetJoystick);
 joystickBase.addEventListener("pointercancel", resetJoystick);
-window.addEventListener("pointerup", resetJoystick);
+joystickBase.addEventListener("lostpointercapture", resetJoystick);
 
 pushButton.addEventListener("pointerdown", (event) => {
   event.preventDefault();

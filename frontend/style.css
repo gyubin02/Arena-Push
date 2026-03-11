@@ -288,6 +288,12 @@ input {
   gap: 12px;
 }
 
+.game-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - 32px);
+}
+
 .hud {
   margin-bottom: 12px;
 }
@@ -307,12 +313,14 @@ input {
 
 .arena-wrap {
   display: flex;
+  flex: 1 1 auto;
+  align-items: center;
   justify-content: center;
   margin-bottom: 14px;
 }
 
 #arena-canvas {
-  width: min(100%, 420px);
+  width: min(100%, 420px, 48vh);
   aspect-ratio: 1;
   border-radius: 24px;
   background:
@@ -325,7 +333,8 @@ input {
   grid-template-columns: minmax(132px, 0.9fr) minmax(0, 1.1fr);
   gap: 16px;
   align-items: stretch;
-  margin-bottom: 8px;
+  margin-top: auto;
+  margin-bottom: calc(20px + env(safe-area-inset-bottom, 0px));
 }
 
 .push-wrap,
@@ -463,6 +472,7 @@ input {
   .controls-row {
     grid-template-columns: 0.92fr 1.08fr;
     gap: 12px;
+    margin-bottom: calc(56px + env(safe-area-inset-bottom, 0px));
   }
 
   .joystick-base {
@@ -478,5 +488,9 @@ input {
   .push-button {
     min-height: 132px;
     border-radius: 24px;
+  }
+
+  #arena-canvas {
+    width: min(100%, 340px, 42vh);
   }
 }

@@ -230,10 +230,32 @@ function renderPublicRooms() {
   });
 }
 
-function renderLobbyPlayers(players) {
+function describePlayerTag(room, player) {
+  if (room.phase === "finished") {
+    if (!room.winnerId) {
+      return { text: "DRAW", className: "draw" };
+    }
+
+    return room.winnerId === player.id
+      ? { text: "WIN", className: "win" }
+      : { text: "LOSE", className: "lose" };
+  }
+
+  if (!player.connected) {
+    return { text: "Offline", className: "" };
+  }
+
+  if (player.ready) {
+    return { text: "Ready", className: "ready" };
+  }
+
+  return { text: "Waiting", className: "" };
+}
+
+function renderLobbyPlayers(room) {
   playerCards.innerHTML = "";
 
-  for (const player of players) {
+  for (const player of room.players) {
     const card = document.createElement("article");
     card.className = "player-card";
 
@@ -257,8 +279,9 @@ function renderLobbyPlayers(players) {
     meta.append(copy);
 
     const tag = document.createElement("span");
-    tag.className = `player-tag ${player.ready ? "ready" : ""}`;
-    tag.textContent = player.ready ? "Ready" : player.connected ? "Waiting" : "Offline";
+    const status = describePlayerTag(room, player);
+    tag.className = `player-tag ${status.className}`.trim();
+    tag.textContent = status.text;
 
     card.append(meta, tag);
     playerCards.append(card);
@@ -426,7 +449,7 @@ function updateRoom(room) {
   syncSelfActionState(room);
 
   roomTitle.textContent = room.roomId;
-  renderLobbyPlayers(room.players);
+  renderLobbyPlayers(room);
   renderPublicRooms();
   renderPushButton();
   lobbyStatus.textContent = describeStatus(room);

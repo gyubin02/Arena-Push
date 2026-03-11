@@ -218,6 +218,21 @@ input {
   background: var(--success);
 }
 
+.player-tag.win {
+  color: #0d2217;
+  background: #72e7a2;
+}
+
+.player-tag.lose {
+  color: #fff2f2;
+  background: rgba(255, 107, 107, 0.88);
+}
+
+.player-tag.draw {
+  color: #fff7d6;
+  background: rgba(255, 196, 61, 0.32);
+}
+
 .primary {
   background: linear-gradient(135deg, var(--accent), var(--accent-strong));
   color: white;

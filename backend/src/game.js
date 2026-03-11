@@ -37,6 +37,12 @@ const createRoundState = () => ({
   players: {}
 });
 
+function getConnectedPlayers(room) {
+  return [...room.players.values()]
+    .filter((player) => player.connected)
+    .sort((a, b) => a.slot - b.slot);
+}
+
 function resetRound(room) {
   room.round = createRoundState();
 
@@ -194,6 +200,22 @@ function determineTimeoutWinner(room) {
     : { winnerId: b.id, reason: "center_control" };
 }
 
+function isPublicRoom(room) {
+  return room.round.phase === "lobby" && getConnectedPlayers(room).length === 1;
+}
+
+function serializePublicRoom(room) {
+  const [host] = getConnectedPlayers(room);
+
+  return {
+    roomId: room.id,
+    hostName: host?.name || "Host",
+    playerCount: getConnectedPlayers(room).length,
+    maxPlayers: config.maxPlayersPerRoom,
+    phase: room.round.phase
+  };
+}
+
 function tickRoom(room, now, deltaSeconds) {
   if (room.round.phase === "countdown" && room.round.countdownEndsAt && now >= room.round.countdownEndsAt) {
     startRound(room);
@@ -253,7 +275,8 @@ function createRoom(id) {
     id,
     players: new Map(),
     round: createRoundState(),
-    lastTickAt: Date.now()
+    lastTickAt: Date.now(),
+    createdAt: Date.now()
   };
 }
 
@@ -280,8 +303,11 @@ module.exports = {
   createRoom,
   determineTimeoutWinner,
   finishRound,
+  getConnectedPlayers,
+  isPublicRoom,
   normalizeInput,
   resetRound,
+  serializePublicRoom,
   serializeRoom,
   tickRoom
 };

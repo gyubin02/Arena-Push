@@ -13,7 +13,10 @@ const {
   createPlayer,
   createRoom,
   finishRound,
+  getConnectedPlayers,
+  isPublicRoom,
   resetRound,
+  serializePublicRoom,
   serializeRoom,
   tickRoom
 } = require("./game");
@@ -28,6 +31,7 @@ const mimeTypes = {
 
 const rooms = new Map();
 const sockets = new Map();
+let wss;
 
 function send(socket, type, payload) {
   if (socket.readyState !== socket.OPEN) {
@@ -50,6 +54,30 @@ function broadcastRoom(room, type, payloadFactory) {
 
 function broadcastState(room) {
   broadcastRoom(room, "state_update", (now) => serializeRoom(room, now));
+}
+
+function getPublicRoomsSnapshot() {
+  return [...rooms.values()]
+    .filter((room) => isPublicRoom(room))
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map((room) => serializePublicRoom(room));
+}
+
+function broadcastRoomsUpdate(targetSocket = null) {
+  const payload = { rooms: getPublicRoomsSnapshot() };
+
+  if (targetSocket) {
+    send(targetSocket, "rooms_update", payload);
+    return;
+  }
+
+  if (!wss) {
+    return;
+  }
+
+  for (const client of wss.clients) {
+    send(client, "rooms_update", payload);
+  }
 }
 
 function makeRoomCode() {
@@ -111,8 +139,14 @@ function handlePlayerDeparture(playerRecord, reason = "player_left") {
   }
 
   room.players.delete(player.id);
+
+  if (getConnectedPlayers(room).length === 1) {
+    resetRound(room);
+  }
+
   broadcastState(room);
   removeRoomIfEmpty(room.id);
+  broadcastRoomsUpdate();
 }
 
 function validateRoomJoin(room, socket) {
@@ -146,6 +180,7 @@ function attachPlayerToRoom(room, socket, name) {
     slot
   });
   broadcastState(room);
+  broadcastRoomsUpdate();
 }
 
 function handleMessage(socket, rawMessage) {
@@ -165,6 +200,11 @@ function handleMessage(socket, rawMessage) {
     const room = createRoom(makeRoomCode());
     rooms.set(room.id, room);
     attachPlayerToRoom(room, socket, String(payload.name || "Player 1").slice(0, 20));
+    return;
+  }
+
+  if (type === "list_rooms") {
+    broadcastRoomsUpdate(socket);
     return;
   }
 
@@ -209,11 +249,12 @@ function handleMessage(socket, rawMessage) {
     }
 
     broadcastState(room);
+    broadcastRoomsUpdate();
     return;
   }
 
   if (type === "input_move") {
-    if (room.round.phase !== "playing") {
+    if (room.round.phase !== "playing" && room.round.phase !== "countdown") {
       return;
     }
 
@@ -237,6 +278,7 @@ function handleMessage(socket, rawMessage) {
     }
 
     broadcastState(room);
+    broadcastRoomsUpdate();
     return;
   }
 }
@@ -266,9 +308,11 @@ function serveStatic(req, res) {
 }
 
 const server = http.createServer(serveStatic);
-const wss = new WebSocketServer({ server, path: "/ws" });
+wss = new WebSocketServer({ server, path: "/ws" });
 
 wss.on("connection", (socket) => {
+  broadcastRoomsUpdate(socket);
+
   socket.on("message", (message) => {
     handleMessage(socket, message);
   });
@@ -296,6 +340,7 @@ setInterval(() => {
     if (result) {
       finishRound(room, result.winnerId, result.reason);
       broadcastRoom(room, "round_end", () => serializeRoom(room, Date.now()));
+      broadcastRoomsUpdate();
     }
 
     broadcastState(room);

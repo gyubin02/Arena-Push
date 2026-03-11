@@ -12,20 +12,41 @@
         <p class="eyebrow">2-Player Mobile Web Mini Game</p>
         <h1>Arena Push</h1>
         <p class="intro-copy">
-          같은 방에 접속한 두 플레이어가 원형 경기장에서 서로를 밀어내는 짧은 실시간 대전입니다.
+          방 코드를 몰라도 공개 대기방에 바로 들어가서 2인 대전을 시작할 수 있습니다.
         </p>
+
         <div class="stack">
           <label class="field">
             <span>Your name</span>
             <input id="player-name" maxlength="20" placeholder="Player" value="Player" />
           </label>
-          <button class="primary" id="create-room">Create room</button>
+          <button class="primary" id="create-room">공개 방 만들기</button>
+        </div>
+
+        <section class="match-list">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Open Rooms</p>
+              <h2>지금 들어갈 수 있는 방</h2>
+            </div>
+            <button class="ghost small" id="refresh-rooms">Refresh</button>
+          </div>
+          <p class="status-line" id="rooms-status">공개 대기방을 불러오는 중입니다.</p>
+          <div class="rooms-grid" id="public-rooms"></div>
+        </section>
+
+        <section class="code-panel">
+          <div class="section-head compact">
+            <div>
+              <p class="eyebrow">Private Code</p>
+              <h2>코드로 바로 참가</h2>
+            </div>
+          </div>
           <div class="join-row">
             <input id="room-code" maxlength="4" placeholder="ROOM" />
             <button id="join-room">Join</button>
           </div>
-        </div>
-        <p class="hint">한 명이 방을 만들고, 다른 한 명은 방 코드를 입력해 들어오면 됩니다.</p>
+        </section>
       </section>
 
       <section class="panel lobby-panel hidden" id="lobby-panel">
@@ -38,8 +59,8 @@
         </div>
         <div class="player-cards" id="player-cards"></div>
         <div class="stack">
-          <button class="primary" id="ready-button">Ready</button>
-          <button class="ghost hidden" id="rematch-button">Rematch</button>
+          <button class="primary" id="ready-button">준비</button>
+          <button class="ghost hidden" id="rematch-button">재대결</button>
         </div>
         <p class="status-line" id="lobby-status">상대가 들어오면 준비를 눌러 시작하세요.</p>
       </section>
@@ -57,8 +78,12 @@
           <div class="joystick-base">
             <div class="joystick-knob" id="joystick-knob"></div>
           </div>
+          <div class="joystick-copy">
+            <strong>Move</strong>
+            <span>왼쪽 조이스틱으로 슬라임을 밀어붙이세요.</span>
+          </div>
         </div>
-        <p class="status-line" id="game-status">왼쪽 조이스틱으로 움직여 상대를 밀어내세요.</p>
+        <p class="status-line" id="game-status">상대를 경기장 밖으로 밀어내세요.</p>
       </section>
     </div>
 

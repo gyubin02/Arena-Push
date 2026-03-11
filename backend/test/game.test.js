@@ -8,7 +8,9 @@ const {
   createRoom,
   determineTimeoutWinner,
   finishRound,
+  isPublicRoom,
   normalizeInput,
+  serializePublicRoom,
   tickRoom
 } = require("../src/game");
 
@@ -67,4 +69,30 @@ test("finishRound stores winner metadata", () => {
   assert.equal(room.round.phase, "finished");
   assert.equal(room.round.winnerId, "a");
   assert.equal(room.round.winReason, "ring_out");
+});
+
+test("single-player lobby room is discoverable in public room list", () => {
+  const room = createRoom("OPEN");
+  const socket = { readyState: 1, OPEN: 1 };
+  const host = createPlayer("host", "Host", socket, 0);
+  room.players.set(host.id, host);
+
+  assert.equal(isPublicRoom(room), true);
+  assert.deepEqual(serializePublicRoom(room), {
+    roomId: "OPEN",
+    hostName: "Host",
+    playerCount: 1,
+    maxPlayers: 2,
+    phase: "lobby"
+  });
+});
+
+test("countdown rooms are hidden from public room list", () => {
+  const room = createRoom("HIDE");
+  const socket = { readyState: 1, OPEN: 1 };
+  const host = createPlayer("host", "Host", socket, 0);
+  room.players.set(host.id, host);
+
+  beginCountdown(room, Date.now());
+  assert.equal(isPublicRoom(room), false);
 });

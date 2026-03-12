@@ -7,6 +7,7 @@ const state = {
   publicRooms: [],
   joystick: { active: false, x: 0, y: 0, pointerId: null },
   push: { activeUntil: 0, cooldownUntil: 0, directionX: 1, directionY: 0 },
+  brace: { activeUntil: 0, cooldownUntil: 0 },
   renderPlayers: new Map(),
   scrollLocked: false,
   scrollLockY: 0,
@@ -26,6 +27,8 @@ const rematchButton = document.getElementById("rematch-button");
 const refreshRoomsButton = document.getElementById("refresh-rooms");
 const pushButton = document.getElementById("push-button");
 const pushMeta = document.getElementById("push-meta");
+const braceButton = document.getElementById("brace-button");
+const braceMeta = document.getElementById("brace-meta");
 const publicRoomsElement = document.getElementById("public-rooms");
 const roomsStatus = document.getElementById("rooms-status");
 const roomTitle = document.getElementById("room-title");
@@ -41,12 +44,14 @@ const ctx = canvas.getContext("2d");
 const joystickBase = document.getElementById("joystick-zone");
 const joystickKnob = document.getElementById("joystick-knob");
 
-const ARENA_RADIUS = 180;
+const BASE_ARENA_RADIUS = 180;
 const PLAYER_RADIUS = 18;
 const PLAYER_SPEED = 240;
 const PUSH_SPEED = 340;
 const PUSH_DURATION_MS = 180;
 const PUSH_COOLDOWN_MS = 900;
+const BRACE_DURATION_MS = 420;
+const BRACE_COOLDOWN_MS = 1700;
 const JOYSTICK_DEADZONE = 0.12;
 const SLIME_COLORS = [
   { base: "#7ee6ff", edge: "#2d89ff", label: "#9be9ff", glow: "rgba(76, 196, 255, 0.22)" },
@@ -62,6 +67,10 @@ function setToast(message) {
 
 function getPlayerName() {
   return playerNameInput.value.trim() || "Player";
+}
+
+function getArenaRadius() {
+  return state.room?.arena?.radius || BASE_ARENA_RADIUS;
 }
 
 function isGameInteractive() {
@@ -129,6 +138,8 @@ function connectSocket(forceReconnect = false) {
     state.joystick.pointerId = null;
     state.push.activeUntil = 0;
     state.push.cooldownUntil = 0;
+    state.brace.activeUntil = 0;
+    state.brace.cooldownUntil = 0;
     state.renderPlayers.clear();
     setScrollLock(false);
     showPanel("menu");
@@ -314,11 +325,13 @@ function describeStatus(room) {
   }
 
   if (room.phase === "countdown") {
-    return "곧 시작합니다. 화면은 고정되고, 이동 입력은 시작과 동시에 반영됩니다.";
+    return "곧 시작합니다. 밀치기와 버티기를 준비하세요. 잠시 뒤 경기장이 서서히 좁아집니다.";
   }
 
   if (room.phase === "playing") {
-    return "오른쪽으로 움직이고, 왼쪽 버튼으로 짧게 돌진하며 강하게 밀어내세요.";
+    return room.arena?.shrinking
+      ? "경기장이 줄어드는 중입니다. 버티기로 받아내고 밀치기로 반격하세요."
+      : "이동으로 각을 만들고, 밀치기와 버티기 타이밍으로 주도권을 잡으세요.";
   }
 
   if (room.winReason === "ring_out") {
@@ -356,6 +369,7 @@ function syncRenderPlayers(room) {
         facingX: player.state.facingX || 1,
         facingY: player.state.facingY || 0,
         isPushing: player.state.isPushing,
+        isBracing: player.state.isBracing,
         alive: player.state.alive,
         slot: player.slot,
         name: player.name,
@@ -370,6 +384,7 @@ function syncRenderPlayers(room) {
     renderState.facingX = player.state.facingX || renderState.facingX;
     renderState.facingY = player.state.facingY || renderState.facingY;
     renderState.isPushing = player.state.isPushing;
+    renderState.isBracing = player.state.isBracing;
     renderState.alive = player.state.alive;
     renderState.slot = player.slot;
     renderState.name = player.name;
@@ -406,6 +421,8 @@ function syncSelfActionState(room) {
   if (room.phase !== "playing") {
     state.push.activeUntil = 0;
     state.push.cooldownUntil = 0;
+    state.brace.activeUntil = 0;
+    state.brace.cooldownUntil = 0;
     return;
   }
 
@@ -413,13 +430,19 @@ function syncSelfActionState(room) {
     state.push.activeUntil = Math.max(state.push.activeUntil, now + selfPlayer.state.pushRemainingMs);
   }
 
+  if (selfPlayer.state.isBracing) {
+    state.brace.activeUntil = Math.max(state.brace.activeUntil, now + selfPlayer.state.braceRemainingMs);
+  }
+
   state.push.cooldownUntil = Math.max(state.push.cooldownUntil, now + selfPlayer.state.pushCooldownRemainingMs);
+  state.brace.cooldownUntil = Math.max(state.brace.cooldownUntil, now + selfPlayer.state.braceCooldownRemainingMs);
 }
 
 function renderPushButton(now = performance.now()) {
   const cooldownMs = Math.max(0, state.push.cooldownUntil - now);
   const isActive = now < state.push.activeUntil;
-  const canUse = Boolean(state.room && state.room.phase === "playing" && cooldownMs === 0);
+  const braceActive = now < state.brace.activeUntil;
+  const canUse = Boolean(state.room && state.room.phase === "playing" && cooldownMs === 0 && !braceActive);
 
   pushButton.classList.toggle("active", isActive);
   pushButton.classList.toggle("cooldown", cooldownMs > 0);
@@ -435,12 +458,55 @@ function renderPushButton(now = performance.now()) {
     return;
   }
 
+  if (braceActive) {
+    pushMeta.textContent = "Brace";
+    return;
+  }
+
   if (cooldownMs > 0) {
     pushMeta.textContent = `${(cooldownMs / 1000).toFixed(1)}s`;
     return;
   }
 
   pushMeta.textContent = "Ready";
+}
+
+function renderBraceButton(now = performance.now()) {
+  const cooldownMs = Math.max(0, state.brace.cooldownUntil - now);
+  const isActive = now < state.brace.activeUntil;
+  const pushActive = now < state.push.activeUntil;
+  const canUse = Boolean(state.room && state.room.phase === "playing" && cooldownMs === 0 && !pushActive);
+
+  braceButton.classList.toggle("active", isActive);
+  braceButton.classList.toggle("cooldown", cooldownMs > 0);
+  braceButton.disabled = !canUse;
+
+  if (!state.room) {
+    braceMeta.textContent = "Ready";
+    return;
+  }
+
+  if (state.room.phase === "countdown") {
+    braceMeta.textContent = "Wait";
+    return;
+  }
+
+  if (pushActive) {
+    braceMeta.textContent = "Push";
+    return;
+  }
+
+  if (isActive) {
+    braceMeta.textContent = "Hold";
+    return;
+  }
+
+  if (cooldownMs > 0) {
+    braceMeta.textContent = `${(cooldownMs / 1000).toFixed(1)}s`;
+    return;
+  }
+
+  braceMeta.textContent = "Ready";
 }
 
 function updateRoom(room) {
@@ -452,6 +518,7 @@ function updateRoom(room) {
   renderLobbyPlayers(room);
   renderPublicRooms();
   renderPushButton();
+  renderBraceButton();
   lobbyStatus.textContent = describeStatus(room);
   gameStatus.textContent = describeStatus(room);
   phaseLabel.textContent = room.phase.toUpperCase();
@@ -516,7 +583,7 @@ function triggerPushAction() {
   }
 
   const now = performance.now();
-  if (now < state.push.cooldownUntil) {
+  if (now < state.push.cooldownUntil || now < state.brace.activeUntil) {
     return;
   }
 
@@ -526,7 +593,25 @@ function triggerPushAction() {
   state.push.activeUntil = now + PUSH_DURATION_MS;
   state.push.cooldownUntil = now + PUSH_COOLDOWN_MS;
   renderPushButton(now);
+  renderBraceButton(now);
   sendOpenSocket("trigger_push");
+}
+
+function triggerBraceAction() {
+  if (!state.room || state.room.phase !== "playing") {
+    return;
+  }
+
+  const now = performance.now();
+  if (now < state.brace.cooldownUntil || now < state.push.activeUntil) {
+    return;
+  }
+
+  state.brace.activeUntil = now + BRACE_DURATION_MS;
+  state.brace.cooldownUntil = now + BRACE_COOLDOWN_MS;
+  renderBraceButton(now);
+  renderPushButton(now);
+  sendOpenSocket("trigger_brace");
 }
 
 function applyJoystickVisual(x, y) {
@@ -615,6 +700,11 @@ pushButton.addEventListener("pointerdown", (event) => {
   triggerPushAction();
 });
 
+braceButton.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  triggerBraceAction();
+});
+
 createRoomButton.addEventListener("click", () => {
   send("create_room", { name: getPlayerName() });
 });
@@ -652,7 +742,7 @@ rematchButton.addEventListener("click", () => {
   send("rematch_request");
 });
 
-[gamePanel, canvas, joystickBase, pushButton].forEach((element) => {
+[gamePanel, canvas, joystickBase, pushButton, braceButton].forEach((element) => {
   element.addEventListener("touchstart", preventGameGesture, { passive: false });
   element.addEventListener("touchmove", preventGameGesture, { passive: false });
 });
@@ -677,28 +767,31 @@ function worldToCanvas(value) {
 }
 
 function drawArena(now) {
+  const arenaRadius = getArenaRadius();
+  const shrinking = Boolean(state.room?.arena?.shrinking);
+
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
   ctx.translate(canvas.width / 2, canvas.height / 2);
 
   const pulse = 0.88 + Math.sin(now / 420) * 0.04;
-  const outerGlow = ctx.createRadialGradient(0, 0, 48, 0, 0, ARENA_RADIUS + 36);
+  const outerGlow = ctx.createRadialGradient(0, 0, 48, 0, 0, arenaRadius + 36);
   outerGlow.addColorStop(0, "rgba(255, 255, 255, 0.08)");
   outerGlow.addColorStop(1, "rgba(255, 255, 255, 0)");
   ctx.fillStyle = outerGlow;
   ctx.beginPath();
-  ctx.arc(0, 0, ARENA_RADIUS + 34, 0, Math.PI * 2);
+  ctx.arc(0, 0, arenaRadius + 34, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = "rgba(255,255,255,0.05)";
+  ctx.fillStyle = shrinking ? "rgba(255, 112, 88, 0.08)" : "rgba(255,255,255,0.05)";
   ctx.beginPath();
-  ctx.arc(0, 0, ARENA_RADIUS, 0, Math.PI * 2);
+  ctx.arc(0, 0, arenaRadius, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = `rgba(255,255,255,${0.22 * pulse})`;
+  ctx.strokeStyle = shrinking ? `rgba(255,112,88,${0.34 * pulse})` : `rgba(255,255,255,${0.22 * pulse})`;
   ctx.lineWidth = 6;
   ctx.beginPath();
-  ctx.arc(0, 0, ARENA_RADIUS, 0, Math.PI * 2);
+  ctx.arc(0, 0, arenaRadius, 0, Math.PI * 2);
   ctx.stroke();
 
   ctx.strokeStyle = "rgba(255,210,95,0.14)";
@@ -714,12 +807,14 @@ function drawSlime(renderState, isSelf, now) {
   const y = worldToCanvas(renderState.y);
   const palette = SLIME_COLORS[renderState.slot] || SLIME_COLORS[0];
   const localPushActive = isSelf && now < state.push.activeUntil;
+  const localBraceActive = isSelf && now < state.brace.activeUntil;
   const pushing = renderState.isPushing || localPushActive;
+  const bracing = renderState.isBracing || localBraceActive;
   const speed = Math.min(1, Math.hypot(renderState.vx, renderState.vy) / (PLAYER_SPEED + PUSH_SPEED * 0.5));
   const wobble = Math.sin(now / 150 + renderState.wobbleOffset) * 0.08;
   const rotation = Math.atan2(renderState.vy || 0.001, renderState.vx || 0.001) * 0.18;
-  const stretchX = 1 + speed * 0.16 + wobble * 0.22 + (pushing ? 0.14 : 0);
-  const stretchY = 1 - speed * 0.1 - wobble * 0.1 - (pushing ? 0.08 : 0);
+  const stretchX = 1 + speed * 0.16 + wobble * 0.22 + (pushing ? 0.14 : 0) - (bracing ? 0.08 : 0);
+  const stretchY = 1 - speed * 0.1 - wobble * 0.1 - (pushing ? 0.08 : 0) + (bracing ? 0.06 : 0);
   const droop = renderState.alive ? 0 : 5;
 
   if (pushing) {
@@ -728,6 +823,16 @@ function drawSlime(renderState, isSelf, now) {
     ctx.beginPath();
     ctx.arc(x, y, PLAYER_RADIUS + 16, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
+  }
+
+  if (bracing) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(115, 214, 255, 0.9)";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(x, y, PLAYER_RADIUS + 12, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -838,18 +943,22 @@ function drawPlayers(deltaMs, now) {
 
     if (isSelf && state.room.phase === "playing") {
       const pushActive = now < state.push.activeUntil;
+      const braceActive = now < state.brace.activeUntil;
       const pushVx = pushActive ? state.push.directionX * PUSH_SPEED : 0;
       const pushVy = pushActive ? state.push.directionY * PUSH_SPEED : 0;
+      const moveVx = braceActive ? 0 : state.joystick.x * PLAYER_SPEED;
+      const moveVy = braceActive ? 0 : state.joystick.y * PLAYER_SPEED;
 
-      renderState.x += (state.joystick.x * PLAYER_SPEED + pushVx) * deltaSeconds;
-      renderState.y += (state.joystick.y * PLAYER_SPEED + pushVy) * deltaSeconds;
-      renderState.vx += (state.joystick.x * PLAYER_SPEED + pushVx - renderState.vx) * 0.28;
-      renderState.vy += (state.joystick.y * PLAYER_SPEED + pushVy - renderState.vy) * 0.28;
+      renderState.x += (moveVx + pushVx) * deltaSeconds;
+      renderState.y += (moveVy + pushVy) * deltaSeconds;
+      renderState.vx += (moveVx + pushVx - renderState.vx) * 0.28;
+      renderState.vy += (moveVy + pushVy - renderState.vy) * 0.28;
       renderState.x += (renderState.serverX - renderState.x) * 0.18;
       renderState.y += (renderState.serverY - renderState.y) * 0.18;
       renderState.vx += (renderState.serverVx - renderState.vx) * 0.08;
       renderState.vy += (renderState.serverVy - renderState.vy) * 0.08;
       renderState.isPushing = pushActive || renderState.isPushing;
+      renderState.isBracing = braceActive || renderState.isBracing;
     } else {
       const positionLerp = Math.min(1, deltaMs / 55);
       renderState.x += (renderState.serverX - renderState.x) * positionLerp;
@@ -868,11 +977,13 @@ function animate(now) {
   drawArena(now);
   drawPlayers(deltaMs, now);
   renderPushButton(now);
+  renderBraceButton(now);
   requestAnimationFrame(animate);
 }
 
 renderPublicRooms();
 renderPushButton();
+renderBraceButton();
 connectSocket();
 requestAnimationFrame(animate);
 showPanel("menu");

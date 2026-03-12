@@ -36,6 +36,8 @@ const createPlayerState = (slot) => {
     pushY: 0,
     pushEndsAt: 0,
     pushCooldownEndsAt: 0,
+    braceEndsAt: 0,
+    braceCooldownEndsAt: 0,
     alive: true
   };
 };
@@ -44,6 +46,7 @@ const createRoundState = () => ({
   phase: "lobby",
   roundEndsAt: null,
   countdownEndsAt: null,
+  playStartsAt: null,
   winnerId: null,
   winReason: null,
   players: {}
@@ -59,6 +62,29 @@ function isPushActive(playerState, now) {
   return playerState.pushEndsAt > now;
 }
 
+function isBraceActive(playerState, now) {
+  return playerState.braceEndsAt > now;
+}
+
+function getArenaRadius(room, now) {
+  if (room.round.playStartsAt == null) {
+    return config.arenaRadius;
+  }
+
+  const elapsedMs = Math.max(0, now - room.round.playStartsAt);
+  if (elapsedMs <= config.arenaShrinkStartMs) {
+    return config.arenaRadius;
+  }
+
+  const progress = clamp(
+    (elapsedMs - config.arenaShrinkStartMs) / config.arenaShrinkDurationMs,
+    0,
+    1
+  );
+
+  return config.arenaRadius - (config.arenaRadius - config.arenaMinRadius) * progress;
+}
+
 function resetRound(room) {
   room.round = createRoundState();
 
@@ -72,6 +98,7 @@ function resetRound(room) {
 function beginCountdown(room, now) {
   room.round.phase = "countdown";
   room.round.countdownEndsAt = now + config.lobbyCountdownMs;
+  room.round.playStartsAt = now + config.lobbyCountdownMs;
   room.round.roundEndsAt = now + config.lobbyCountdownMs + config.roundDurationMs;
   room.round.winnerId = null;
   room.round.winReason = null;
@@ -149,7 +176,7 @@ function applyInput(player, input) {
 }
 
 function triggerPush(player, now) {
-  if (!player.state.alive || player.state.pushCooldownEndsAt > now) {
+  if (!player.state.alive || player.state.pushCooldownEndsAt > now || isBraceActive(player.state, now)) {
     return false;
   }
 
@@ -162,6 +189,16 @@ function triggerPush(player, now) {
   player.state.pushY = direction.y || 0;
   player.state.pushEndsAt = now + config.pushDurationMs;
   player.state.pushCooldownEndsAt = now + config.pushCooldownMs;
+  return true;
+}
+
+function triggerBrace(player, now) {
+  if (!player.state.alive || player.state.braceCooldownEndsAt > now || isPushActive(player.state, now)) {
+    return false;
+  }
+
+  player.state.braceEndsAt = now + config.braceDurationMs;
+  player.state.braceCooldownEndsAt = now + config.braceCooldownMs;
   return true;
 }
 
@@ -194,26 +231,31 @@ function resolveCollision(playerA, playerB, now) {
   );
   const aPushBonus = isPushActive(playerA, now) ? config.pushCollisionImpulse : 0;
   const bPushBonus = isPushActive(playerB, now) ? config.pushCollisionImpulse : 0;
+  const aBraceMultiplier = isBraceActive(playerA, now) ? config.braceKnockbackMultiplier : 1;
+  const bBraceMultiplier = isBraceActive(playerB, now) ? config.braceKnockbackMultiplier : 1;
 
-  playerA.knockbackX -= normalX * (sharedImpulse + bPushBonus);
-  playerA.knockbackY -= normalY * (sharedImpulse + bPushBonus);
-  playerB.knockbackX += normalX * (sharedImpulse + aPushBonus);
-  playerB.knockbackY += normalY * (sharedImpulse + aPushBonus);
+  playerA.knockbackX -= normalX * (sharedImpulse + bPushBonus) * aBraceMultiplier;
+  playerA.knockbackY -= normalY * (sharedImpulse + bPushBonus) * aBraceMultiplier;
+  playerB.knockbackX += normalX * (sharedImpulse + aPushBonus) * bBraceMultiplier;
+  playerB.knockbackY += normalY * (sharedImpulse + aPushBonus) * bBraceMultiplier;
 }
 
 function updatePhysics(room, now, deltaSeconds) {
   const activePlayers = [...room.players.values()].filter((player) => player.state.alive);
+  const arenaRadius = getArenaRadius(room, now);
 
   for (const player of activePlayers) {
     const knockbackDecay = Math.max(0, 1 - config.knockbackDragPerSecond * deltaSeconds);
     player.state.knockbackX *= knockbackDecay;
     player.state.knockbackY *= knockbackDecay;
 
+    const bracing = isBraceActive(player.state, now);
     const dashVx = isPushActive(player.state, now) ? player.state.pushX * config.pushBoostSpeed : 0;
     const dashVy = isPushActive(player.state, now) ? player.state.pushY * config.pushBoostSpeed : 0;
+    const moveSpeed = bracing ? 0 : config.playerSpeed;
 
-    player.state.vx = player.state.inputX * config.playerSpeed + dashVx + player.state.knockbackX;
-    player.state.vy = player.state.inputY * config.playerSpeed + dashVy + player.state.knockbackY;
+    player.state.vx = player.state.inputX * moveSpeed + dashVx + player.state.knockbackX;
+    player.state.vy = player.state.inputY * moveSpeed + dashVy + player.state.knockbackY;
     player.state.x += player.state.vx * deltaSeconds;
     player.state.y += player.state.vy * deltaSeconds;
   }
@@ -223,7 +265,7 @@ function updatePhysics(room, now, deltaSeconds) {
   }
 
   for (const player of activePlayers) {
-    if (vectorLength(player.state) > config.arenaRadius) {
+    if (vectorLength(player.state) > arenaRadius) {
       player.state.alive = false;
     }
   }
@@ -293,12 +335,20 @@ function tickRoom(room, now, deltaSeconds) {
 }
 
 function serializeRoom(room, now) {
+  const arenaRadius = getArenaRadius(room, now);
+
   return {
     roomId: room.id,
     phase: room.round.phase,
     winnerId: room.round.winnerId,
     winReason: room.round.winReason,
     remainingMs: getRemainingTimeMs(room, now),
+    arena: {
+      radius: Number(arenaRadius.toFixed(2)),
+      baseRadius: config.arenaRadius,
+      minRadius: config.arenaMinRadius,
+      shrinking: arenaRadius < config.arenaRadius
+    },
     players: [...room.players.values()]
       .sort((a, b) => a.slot - b.slot)
       .map((player) => ({
@@ -318,6 +368,9 @@ function serializeRoom(room, now) {
           isPushing: isPushActive(player.state, now),
           pushRemainingMs: Math.max(0, player.state.pushEndsAt - now),
           pushCooldownRemainingMs: Math.max(0, player.state.pushCooldownEndsAt - now),
+          isBracing: isBraceActive(player.state, now),
+          braceRemainingMs: Math.max(0, player.state.braceEndsAt - now),
+          braceCooldownRemainingMs: Math.max(0, player.state.braceCooldownEndsAt - now),
           alive: player.state.alive
         }
       }))
@@ -357,7 +410,9 @@ module.exports = {
   createRoom,
   determineTimeoutWinner,
   finishRound,
+  getArenaRadius,
   getConnectedPlayers,
+  isBraceActive,
   isPublicRoom,
   isPushActive,
   normalizeInput,
@@ -365,5 +420,6 @@ module.exports = {
   serializePublicRoom,
   serializeRoom,
   tickRoom,
+  triggerBrace,
   triggerPush
 };

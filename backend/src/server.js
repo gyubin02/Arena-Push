@@ -19,6 +19,7 @@ const {
   serializePublicRoom,
   serializeRoom,
   tickRoom,
+  triggerBrace,
   triggerPush
 } = require("./game");
 
@@ -269,6 +270,18 @@ function handleMessage(socket, rawMessage) {
     }
 
     const triggered = triggerPush(player, Date.now());
+    if (triggered) {
+      broadcastState(room);
+    }
+    return;
+  }
+
+  if (type === "trigger_brace") {
+    if (room.round.phase !== "playing") {
+      return;
+    }
+
+    const triggered = triggerBrace(player, Date.now());
     if (triggered) {
       broadcastState(room);
     }

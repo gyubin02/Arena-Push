@@ -8,12 +8,14 @@ const {
   createRoom,
   determineTimeoutWinner,
   finishRound,
+  getArenaRadius,
   isPublicRoom,
   isPushActive,
   normalizeInput,
   serializePublicRoom,
   serializeRoom,
   tickRoom,
+  triggerBrace,
   triggerPush
 } = require("../src/game");
 
@@ -110,6 +112,17 @@ test("triggerPush enables temporary push state and cooldown", () => {
   assert.equal(triggerPush(player, now + 10), false);
 });
 
+test("triggerBrace enables temporary brace state and blocks push", () => {
+  const player = createPlayer("a", "A", null, 0);
+  const now = 1000;
+
+  assert.equal(triggerBrace(player, now), true);
+  assert.equal(player.state.braceEndsAt > now, true);
+  assert.equal(player.state.braceCooldownEndsAt > now, true);
+  assert.equal(triggerPush(player, now + 20), false);
+  assert.equal(triggerBrace(player, now + 20), false);
+});
+
 test("serializeRoom includes push metadata for clients", () => {
   const room = createRoom("PUSH");
   const socket = { readyState: 1, OPEN: 1 };
@@ -121,4 +134,58 @@ test("serializeRoom includes push metadata for clients", () => {
   assert.equal(snapshot.players[0].state.isPushing, true);
   assert.ok(snapshot.players[0].state.pushRemainingMs > 0);
   assert.ok(snapshot.players[0].state.pushCooldownRemainingMs > 0);
+});
+
+test("serializeRoom includes brace and arena metadata for clients", () => {
+  const room = createRoom("BRCE");
+  const socket = { readyState: 1, OPEN: 1 };
+  const player = createPlayer("a", "A", socket, 0);
+  room.players.set(player.id, player);
+  room.round.playStartsAt = 0;
+  triggerBrace(player, 12500);
+
+  const snapshot = serializeRoom(room, 13000);
+  assert.equal(snapshot.arena.shrinking, true);
+  assert.ok(snapshot.arena.radius < snapshot.arena.baseRadius);
+  assert.equal(snapshot.players[0].state.isBracing, false);
+  assert.ok(snapshot.players[0].state.braceCooldownRemainingMs > 0);
+});
+
+test("tickRoom uses shrinking arena radius for ring outs", () => {
+  const room = createRoom("SHRK");
+  const socket = { readyState: 1, OPEN: 1 };
+  const a = createPlayer("a", "A", socket, 0);
+  const b = createPlayer("b", "B", socket, 1);
+  room.players.set(a.id, a);
+  room.players.set(b.id, b);
+
+  beginCountdown(room, 0);
+  room.round.phase = "playing";
+  room.round.playStartsAt = 0;
+  a.state.x = getArenaRadius(room, 999999) + 1;
+  b.state.x = 0;
+
+  const result = tickRoom(room, 999999, 1 / 30);
+  assert.equal(result.winnerId, "b");
+  assert.equal(result.reason, "ring_out");
+});
+
+test("bracing prevents movement input from moving the player", () => {
+  const room = createRoom("HOLD");
+  const socket = { readyState: 1, OPEN: 1 };
+  const a = createPlayer("a", "A", socket, 0);
+  const b = createPlayer("b", "B", socket, 1);
+  room.players.set(a.id, a);
+  room.players.set(b.id, b);
+
+  beginCountdown(room, 0);
+  room.round.phase = "playing";
+  a.state.x = -70;
+  b.state.x = 70;
+
+  triggerBrace(a, 0);
+  applyInput(a, { x: 1, y: 0 });
+  tickRoom(room, 100, 0.1);
+
+  assert.equal(a.state.x, -70);
 });

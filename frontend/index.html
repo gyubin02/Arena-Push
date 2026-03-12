@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Arena Push</title>
-    <link rel="stylesheet" href="/style.css?v=20260312-2" />
+    <link rel="stylesheet" href="/style.css?v=20260313-1" />
   </head>
   <body>
     <div class="shell">
@@ -12,7 +12,8 @@
         <p class="eyebrow">2-Player Mobile Web Mini Game</p>
         <h1>Arena Push</h1>
         <p class="intro-copy">
-          방 코드를 몰라도 공개 대기방에 바로 들어가서 2인 대전을 시작할 수 있습니다.
+          방 코드를 몰라도 공개 대기방에 바로 들어가서 2인 대전을 시작할 수 있습니다. 밀치기와 버티기를
+          섞어, 점점 좁아지는 경기장에서 상대를 떨어뜨리세요.
         </p>
 
         <div class="stack">
@@ -75,11 +76,19 @@
           <canvas id="arena-canvas" width="420" height="420"></canvas>
         </div>
         <div class="controls-row">
-          <div class="push-wrap">
-            <button class="push-button" id="push-button" type="button">
-              <span class="push-title">밀치기</span>
-              <span class="push-meta" id="push-meta">Ready</span>
-            </button>
+          <div class="actions-stack">
+            <div class="push-wrap">
+              <button class="push-button" id="push-button" type="button">
+                <span class="push-title">밀치기</span>
+                <span class="push-meta" id="push-meta">Ready</span>
+              </button>
+            </div>
+            <div class="brace-wrap">
+              <button class="brace-button" id="brace-button" type="button">
+                <span class="push-title">버티기</span>
+                <span class="push-meta" id="brace-meta">Ready</span>
+              </button>
+            </div>
           </div>
           <div class="joystick-wrap">
             <div class="joystick-base" id="joystick-zone">
@@ -92,6 +101,6 @@
     </div>
 
     <div class="toast hidden" id="toast"></div>
-    <script src="/app.js?v=20260312-2"></script>
+    <script src="/app.js?v=20260313-1"></script>
   </body>
 </html>

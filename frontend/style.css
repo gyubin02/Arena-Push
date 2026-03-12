@@ -352,9 +352,16 @@ input {
   margin-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 }
 
+.actions-stack,
 .push-wrap,
+.brace-wrap,
 .joystick-wrap {
   min-width: 0;
+}
+
+.actions-stack {
+  display: grid;
+  gap: 10px;
 }
 
 .push-wrap {
@@ -362,13 +369,16 @@ input {
   align-items: center;
 }
 
-.push-button {
+.brace-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.push-button,
+.brace-button {
   width: 100%;
-  min-height: 148px;
+  min-height: 100px;
   border-radius: 28px;
-  background:
-    radial-gradient(circle at top, rgba(255, 255, 255, 0.18), transparent 40%),
-    linear-gradient(180deg, #ff8d5f, #ff6130);
   color: white;
   display: grid;
   place-items: center;
@@ -378,18 +388,33 @@ input {
   user-select: none;
 }
 
-.push-button.active {
+.push-button {
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.18), transparent 40%),
+    linear-gradient(180deg, #ff8d5f, #ff6130);
+}
+
+.brace-button {
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.18), transparent 40%),
+    linear-gradient(180deg, #63cfff, #287dff);
+}
+
+.push-button.active,
+.brace-button.active {
   transform: translateY(1px) scale(0.98);
   box-shadow:
     inset 0 -6px 14px rgba(0, 0, 0, 0.18),
     0 0 0 4px rgba(255, 255, 255, 0.12);
 }
 
-.push-button.cooldown {
+.push-button.cooldown,
+.brace-button.cooldown {
   opacity: 0.78;
 }
 
-.push-button:disabled {
+.push-button:disabled,
+.brace-button:disabled {
   cursor: not-allowed;
 }
 
@@ -484,8 +509,9 @@ input {
     height: 56px;
   }
 
-  .push-button {
-    min-height: 132px;
+  .push-button,
+  .brace-button {
+    min-height: 92px;
     border-radius: 24px;
   }
 

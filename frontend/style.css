@@ -308,6 +308,10 @@ input {
   flex-direction: column;
   justify-content: flex-start;
   min-height: calc(100dvh - 32px);
+  background:
+    radial-gradient(circle at top, rgba(255, 219, 135, 0.12), transparent 34%),
+    radial-gradient(circle at bottom, rgba(79, 195, 255, 0.12), transparent 38%),
+    var(--panel);
 }
 
 .hud {
@@ -320,6 +324,8 @@ input {
   text-align: center;
   padding: 10px 12px;
   font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
 .timer {
@@ -331,16 +337,29 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  padding: 10px;
+  border-radius: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at top, rgba(255, 214, 122, 0.14), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.12));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 18px 34px rgba(0, 0, 0, 0.22);
 }
 
 #arena-canvas {
   width: min(100%, 420px, 48vh);
   aspect-ratio: 1;
   border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     radial-gradient(circle at center, rgba(255, 255, 255, 0.08), transparent 45%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.14));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.18));
+  box-shadow:
+    0 24px 40px rgba(0, 0, 0, 0.28),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
 .controls-row {

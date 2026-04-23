@@ -11,7 +11,12 @@ const state = {
   renderPlayers: new Map(),
   scrollLocked: false,
   scrollLockY: 0,
-  lastFrameAt: performance.now()
+  lastFrameAt: performance.now(),
+  stageFx: {
+    phase: "menu",
+    phaseChangedAt: performance.now(),
+    winnerId: null
+  }
 };
 
 const menuPanel = document.getElementById("menu-panel");
@@ -53,10 +58,34 @@ const PUSH_COOLDOWN_MS = 900;
 const BRACE_DURATION_MS = 420;
 const BRACE_COOLDOWN_MS = 1700;
 const JOYSTICK_DEADZONE = 0.12;
+const COUNTDOWN_DURATION_MS = 3000;
 const SLIME_COLORS = [
   { base: "#7ee6ff", edge: "#2d89ff", label: "#9be9ff", glow: "rgba(76, 196, 255, 0.22)" },
   { base: "#ffb591", edge: "#ff6130", label: "#ffc7ab", glow: "rgba(255, 109, 79, 0.22)" }
 ];
+const spotlightAssets = {
+  beam: createCanvasAsset("/assets/spotlight-beam-v1.png"),
+  burst: createCanvasAsset("/assets/spotlight-burst-v1.png")
+};
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function lerp(start, end, amount) {
+  return start + (end - start) * amount;
+}
+
+function createCanvasAsset(src) {
+  const image = new Image();
+  image.decoding = "async";
+  image.src = src;
+  return image;
+}
+
+function isCanvasAssetReady(image) {
+  return Boolean(image?.complete && image.naturalWidth > 0);
+}
 
 function setToast(message) {
   toast.textContent = message;
@@ -141,6 +170,7 @@ function connectSocket(forceReconnect = false) {
     state.brace.activeUntil = 0;
     state.brace.cooldownUntil = 0;
     state.renderPlayers.clear();
+    resetStageFx();
     setScrollLock(false);
     showPanel("menu");
     renderPublicRooms();
@@ -185,6 +215,27 @@ function showPanel(target) {
   menuPanel.classList.toggle("hidden", target !== "menu");
   lobbyPanel.classList.toggle("hidden", target !== "lobby");
   gamePanel.classList.toggle("hidden", target !== "game");
+}
+
+function resetStageFx() {
+  state.stageFx.phase = "menu";
+  state.stageFx.phaseChangedAt = performance.now();
+  state.stageFx.winnerId = null;
+}
+
+function syncStageFx(room) {
+  const now = performance.now();
+
+  if (state.stageFx.phase !== room.phase) {
+    state.stageFx.phase = room.phase;
+    state.stageFx.phaseChangedAt = now;
+  }
+
+  if (room.phase === "finished" && state.stageFx.winnerId !== room.winnerId) {
+    state.stageFx.phaseChangedAt = now;
+  }
+
+  state.stageFx.winnerId = room.winnerId || null;
 }
 
 function renderPublicRooms() {
@@ -510,6 +561,7 @@ function renderBraceButton(now = performance.now()) {
 }
 
 function updateRoom(room) {
+  syncStageFx(room);
   state.room = room;
   syncRenderPlayers(room);
   syncSelfActionState(room);
@@ -766,38 +818,284 @@ function worldToCanvas(value) {
   return canvas.width / 2 + value;
 }
 
+function getCountdownProgress() {
+  if (state.room?.phase !== "countdown") {
+    return 0;
+  }
+
+  return clampNumber(1 - (state.room.remainingMs || COUNTDOWN_DURATION_MS) / COUNTDOWN_DURATION_MS, 0, 1);
+}
+
+function getShrinkProgress() {
+  const arena = state.room?.arena;
+  if (!arena) {
+    return 0;
+  }
+
+  return clampNumber((arena.baseRadius - arena.radius) / Math.max(1, arena.baseRadius - arena.minRadius), 0, 1);
+}
+
+function getStageIntensity(now) {
+  if (!state.room) {
+    return 0.18;
+  }
+
+  if (state.room.phase === "countdown") {
+    return lerp(0.36, 0.9, getCountdownProgress());
+  }
+
+  if (state.room.phase === "playing") {
+    return state.room.arena?.shrinking ? lerp(0.74, 1.04, getShrinkProgress()) : 0.66;
+  }
+
+  if (state.room.phase === "finished") {
+    const reveal = clampNumber((now - state.stageFx.phaseChangedAt) / 750, 0, 1);
+    return lerp(0.84, 1.08, reveal);
+  }
+
+  return 0.24;
+}
+
+function getWinnerSpotlightTarget() {
+  const winnerRenderState = state.room?.winnerId ? state.renderPlayers.get(state.room.winnerId) : null;
+  if (winnerRenderState) {
+    return {
+      x: worldToCanvas(winnerRenderState.x),
+      y: worldToCanvas(winnerRenderState.y)
+    };
+  }
+
+  return {
+    x: canvas.width / 2,
+    y: canvas.height / 2
+  };
+}
+
+function drawSpotlightBurst(x, y, size, alpha, rotation = 0) {
+  const radius = size / 2;
+
+  if (!isCanvasAssetReady(spotlightAssets.burst)) {
+    ctx.save();
+    const burstGradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    burstGradient.addColorStop(0, `rgba(255, 246, 208, ${alpha})`);
+    burstGradient.addColorStop(0.55, `rgba(255, 214, 126, ${alpha * 0.48})`);
+    burstGradient.addColorStop(1, "rgba(255, 214, 126, 0)");
+    ctx.fillStyle = burstGradient;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rotation);
+  ctx.globalCompositeOperation = "screen";
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(spotlightAssets.burst, -radius, -radius, size, size);
+  ctx.restore();
+}
+
+function drawTargetedSpotlight(sourceX, sourceY, targetX, targetY, options = {}) {
+  const dx = targetX - sourceX;
+  const dy = targetY - sourceY;
+  const distance = Math.hypot(dx, dy);
+  const rotation = Math.atan2(dy, dx) - Math.PI / 2;
+  const height = options.height || distance + 118;
+  const width = options.width || Math.min(canvas.width * 0.56, height * 0.45);
+  const alpha = options.alpha || 0.24;
+  const bottomOffset = options.bottomOffset || 10;
+
+  ctx.save();
+  ctx.translate(targetX, targetY);
+  ctx.rotate(rotation);
+  ctx.globalCompositeOperation = "screen";
+
+  if (!isCanvasAssetReady(spotlightAssets.beam)) {
+    const fallbackGradient = ctx.createLinearGradient(0, -height, 0, bottomOffset);
+    fallbackGradient.addColorStop(0, "rgba(255, 255, 255, 0)");
+    fallbackGradient.addColorStop(0.3, `rgba(255, 250, 232, ${alpha * 0.54})`);
+    fallbackGradient.addColorStop(1, `rgba(112, 216, 255, ${alpha * 0.26})`);
+    ctx.fillStyle = fallbackGradient;
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.moveTo(-width * 0.14, -height);
+    ctx.lineTo(-width * 0.5, bottomOffset);
+    ctx.lineTo(width * 0.5, bottomOffset);
+    ctx.lineTo(width * 0.14, -height);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  ctx.globalAlpha = alpha * 0.58;
+  ctx.filter = "blur(9px)";
+  ctx.drawImage(spotlightAssets.beam, -width / 2, -height + bottomOffset, width, height);
+  ctx.filter = "none";
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(spotlightAssets.beam, -width / 2, -height + bottomOffset, width, height);
+  ctx.restore();
+}
+
+function drawArenaBackdrop(now) {
+  const stageIntensity = getStageIntensity(now);
+  const baseGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  baseGradient.addColorStop(0, "#173055");
+  baseGradient.addColorStop(0.46, "#0a1730");
+  baseGradient.addColorStop(1, "#050915");
+  ctx.fillStyle = baseGradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const topGlow = ctx.createRadialGradient(
+    canvas.width / 2,
+    canvas.height * 0.06,
+    18,
+    canvas.width / 2,
+    canvas.height * 0.08,
+    canvas.width * 0.8
+  );
+  topGlow.addColorStop(0, `rgba(255, 235, 184, ${0.18 + stageIntensity * 0.14})`);
+  topGlow.addColorStop(0.4, `rgba(121, 213, 255, ${0.1 + stageIntensity * 0.08})`);
+  topGlow.addColorStop(1, "rgba(8, 12, 22, 0)");
+  ctx.fillStyle = topGlow;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let index = 0; index < 7; index += 1) {
+    const progress = index / 6;
+    const x = 42 + progress * (canvas.width - 84);
+    const y = 34 + Math.sin(now / 520 + index * 0.9) * 2.5;
+    const radius = 4.5 + (index % 2) * 1.5;
+    const lightGradient = ctx.createRadialGradient(x, y, 0, x, y, radius * 3);
+    lightGradient.addColorStop(0, `rgba(255, 225, 148, ${0.22 + stageIntensity * 0.12})`);
+    lightGradient.addColorStop(1, "rgba(255, 225, 148, 0)");
+    ctx.fillStyle = lightGradient;
+    ctx.beginPath();
+    ctx.arc(x, y, radius * 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const vignette = ctx.createRadialGradient(
+    canvas.width / 2,
+    canvas.height / 2,
+    canvas.width * 0.12,
+    canvas.width / 2,
+    canvas.height / 2,
+    canvas.width * 0.68
+  );
+  vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+  vignette.addColorStop(1, "rgba(0, 0, 0, 0.36)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawStageSpotlights(now) {
+  if (!state.room || state.room.phase === "lobby") {
+    return;
+  }
+
+  const stageIntensity = getStageIntensity(now);
+  const countdownProgress = getCountdownProgress();
+  const shrinkProgress = getShrinkProgress();
+  const centerX = canvas.width / 2;
+  const centerY = canvas.height / 2 + 12;
+  const sweepRate = state.room.phase === "countdown" ? 560 : state.room.arena?.shrinking ? 360 : 760;
+  const beamWidth = 132 + stageIntensity * 54 + countdownProgress * 34 + shrinkProgress * 22;
+  const leftTarget = {
+    x: centerX - 66 + Math.sin(now / sweepRate) * (72 + shrinkProgress * 18),
+    y: centerY + 16 + Math.cos(now / (sweepRate + 120)) * 18
+  };
+  const rightTarget = {
+    x: centerX + 66 + Math.sin(now / (sweepRate + 160) + 1.6) * (72 + shrinkProgress * 18),
+    y: centerY + 16 + Math.cos(now / (sweepRate + 90) + 0.8) * 18
+  };
+
+  drawTargetedSpotlight(60 + Math.sin(now / 930) * 18, -28, leftTarget.x, leftTarget.y, {
+    width: beamWidth,
+    alpha: 0.15 + stageIntensity * 0.2
+  });
+  drawTargetedSpotlight(canvas.width - 60 + Math.cos(now / 860) * 18, -28, rightTarget.x, rightTarget.y, {
+    width: beamWidth,
+    alpha: 0.14 + stageIntensity * 0.19
+  });
+
+  if (state.room.phase === "countdown" || state.room.phase === "playing") {
+    const pulse = 1 + Math.sin(now / 240) * 0.04;
+    drawSpotlightBurst(centerX, centerY, (170 + stageIntensity * 78) * pulse, 0.06 + stageIntensity * 0.06, now / 2200);
+  }
+
+  if (state.room.arena?.shrinking) {
+    const hazardX = centerX + Math.sin(now / 260) * (48 + shrinkProgress * 32);
+    const hazardY = centerY + Math.cos(now / 310) * 18;
+    drawSpotlightBurst(hazardX, hazardY, 92 + shrinkProgress * 56, 0.08 + shrinkProgress * 0.1, now / 1200);
+  }
+
+  if (state.room.phase === "finished") {
+    const winnerTarget = getWinnerSpotlightTarget();
+    const reveal = clampNumber((now - state.stageFx.phaseChangedAt) / 420, 0, 1);
+    drawTargetedSpotlight(canvas.width / 2, -38, winnerTarget.x, winnerTarget.y + 10, {
+      width: 118 + reveal * 54,
+      alpha: 0.28 + reveal * 0.18,
+      bottomOffset: 14
+    });
+    drawSpotlightBurst(
+      winnerTarget.x,
+      winnerTarget.y,
+      156 + reveal * 124 + Math.sin(now / 170) * 8,
+      0.16 + reveal * 0.16,
+      now / 1400
+    );
+  }
+}
+
 function drawArena(now) {
   const arenaRadius = getArenaRadius();
   const shrinking = Boolean(state.room?.arena?.shrinking);
+  const shrinkProgress = getShrinkProgress();
+  const stageIntensity = getStageIntensity(now);
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawArenaBackdrop(now);
+  drawStageSpotlights(now);
   ctx.save();
   ctx.translate(canvas.width / 2, canvas.height / 2);
 
   const pulse = 0.88 + Math.sin(now / 420) * 0.04;
-  const outerGlow = ctx.createRadialGradient(0, 0, 48, 0, 0, arenaRadius + 36);
-  outerGlow.addColorStop(0, "rgba(255, 255, 255, 0.08)");
+  const outerGlow = ctx.createRadialGradient(0, 0, 48, 0, 0, arenaRadius + 40);
+  outerGlow.addColorStop(
+    0,
+    shrinking
+      ? `rgba(255, 214, 176, ${0.1 + shrinkProgress * 0.14})`
+      : `rgba(172, 231, 255, ${0.08 + stageIntensity * 0.08})`
+  );
   outerGlow.addColorStop(1, "rgba(255, 255, 255, 0)");
   ctx.fillStyle = outerGlow;
   ctx.beginPath();
-  ctx.arc(0, 0, arenaRadius + 34, 0, Math.PI * 2);
+  ctx.arc(0, 0, arenaRadius + 38, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = shrinking ? "rgba(255, 112, 88, 0.08)" : "rgba(255,255,255,0.05)";
+  const floorGradient = ctx.createRadialGradient(0, 0, 18, 0, 0, arenaRadius);
+  floorGradient.addColorStop(0, shrinking ? "rgba(255, 219, 170, 0.18)" : "rgba(177, 238, 255, 0.16)");
+  floorGradient.addColorStop(0.58, shrinking ? "rgba(97, 40, 24, 0.28)" : "rgba(18, 39, 67, 0.24)");
+  floorGradient.addColorStop(1, "rgba(255, 255, 255, 0.03)");
+  ctx.fillStyle = floorGradient;
   ctx.beginPath();
   ctx.arc(0, 0, arenaRadius, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = shrinking ? `rgba(255,112,88,${0.34 * pulse})` : `rgba(255,255,255,${0.22 * pulse})`;
-  ctx.lineWidth = 6;
+  ctx.strokeStyle = shrinking
+    ? `rgba(255, 150, 110, ${0.36 + shrinkProgress * 0.16})`
+    : `rgba(230, 246, 255, ${(0.22 + stageIntensity * 0.06) * pulse})`;
+  ctx.lineWidth = shrinking ? 7 : 6;
   ctx.beginPath();
   ctx.arc(0, 0, arenaRadius, 0, Math.PI * 2);
   ctx.stroke();
 
-  ctx.strokeStyle = "rgba(255,210,95,0.14)";
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = `rgba(255, 210, 95, ${0.12 + stageIntensity * 0.08})`;
+  ctx.lineWidth = 2.5;
   ctx.beginPath();
-  ctx.arc(0, 0, 84, 0, Math.PI * 2);
+  ctx.arc(0, 0, 84 + Math.sin(now / 500) * 2.5, 0, Math.PI * 2);
   ctx.stroke();
   ctx.restore();
 }
@@ -971,11 +1269,38 @@ function drawPlayers(deltaMs, now) {
   }
 }
 
+function drawWinnerAccent(now) {
+  if (!state.room || state.room.phase !== "finished" || !state.room.winnerId) {
+    return;
+  }
+
+  const winnerTarget = getWinnerSpotlightTarget();
+  const reveal = clampNumber((now - state.stageFx.phaseChangedAt) / 360, 0, 1);
+  const ringRadius = PLAYER_RADIUS + 16 + Math.sin(now / 150) * 2.2;
+
+  ctx.save();
+  ctx.strokeStyle = `rgba(255, 243, 194, ${0.34 + reveal * 0.24})`;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(winnerTarget.x, winnerTarget.y, ringRadius, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  drawSpotlightBurst(
+    winnerTarget.x,
+    winnerTarget.y,
+    112 + reveal * 60 + Math.sin(now / 210) * 5,
+    0.08 + reveal * 0.06,
+    now / 900
+  );
+}
+
 function animate(now) {
   const deltaMs = now - state.lastFrameAt;
   state.lastFrameAt = now;
   drawArena(now);
   drawPlayers(deltaMs, now);
+  drawWinnerAccent(now);
   renderPushButton(now);
   renderBraceButton(now);
   requestAnimationFrame(animate);
